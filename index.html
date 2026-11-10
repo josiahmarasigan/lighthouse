@@ -57,7 +57,7 @@
     ===========================================================
   -->
   <script>
-    window.LIGHTHOUSE_APP_URL = 'https://script.google.com/a/macros/philradsolutions.com/s/AKfycbwolb9PfwAZ_RmpaaYkM5yAHLQRJ7dxxHmnKHvAKZk1xusUj5LVTfcF873lXDrsKtYBQA/exec';
+    window.LIGHTHOUSE_APP_URL = 'https://script.google.com/macros/s/AKfycbwolb9PfwAZ_RmpaaYkM5yAHLQRJ7dxxHmnKHvAKZk1xusUj5LVTfcF873lXDrsKtYBQA/exec';
     window.LIGHTHOUSE_NAME = 'Lighthouse';
   </script>
 
@@ -99,8 +99,16 @@
     }
 
     // Not set up yet
-    if (!/^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/.test(APP) && !/^http:\/\/localhost(:\d+)?\//.test(APP)) {
-      notice('Almost ready', 'Open index.html and paste your Apps Script web app link (ending in /exec) where it says PASTE_YOUR_WEB_APP_URL_HERE.');
+    // Accepts personal links (script.google.com/macros/s/…/exec) and
+    // Google Workspace links (script.google.com/a/macros/<your-domain>/s/…/exec).
+    APP = APP.replace(/[?#].*$/, '');
+    var okLink = /^https:\/\/script\.google\.com\/(a\/macros\/[^\/\s]+|macros)\/s\/[\w-]+\/exec$/.test(APP) || /^http:\/\/localhost(:\d+)?\//.test(APP);
+    if (!okLink) {
+      if (!APP || APP === 'PASTE_YOUR_WEB_APP_URL_HERE') {
+        notice('Almost ready', 'Open index.html and paste your Apps Script web app link (ending in /exec) where it says PASTE_YOUR_WEB_APP_URL_HERE.');
+      } else {
+        notice('Check the app link', 'The link in index.html should start with https://script.google.com/ and end with /exec (not /dev). It currently is: ' + APP);
+      }
       return;
     }
 
