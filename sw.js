@@ -1,7 +1,7 @@
-// Lighthouse app page helper: keeps this small page and the logo available,
-// so the app opens with its splash even on a slow connection.
-// The church app itself always loads fresh from Google (it is never stored here).
-const CACHE = 'lighthouse-shell-v1';
+// Lighthouse app page helper: keeps the app page and the logo saved on the phone,
+// so it opens quickly even on a slow connection (always checks for a newer copy first).
+// Data from Google (sign-in, events, prayer…) is never stored here.
+const CACHE = 'lighthouse-app-v2';
 const FILES = ['./', 'index.html', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png', 'icons/favicon.png'];
 
 self.addEventListener('install', function (e) {
