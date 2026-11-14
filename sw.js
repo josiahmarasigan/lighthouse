@@ -1,7 +1,7 @@
 // Lighthouse app page helper: keeps the app page and the logo saved on the phone,
 // so it opens quickly even on a slow connection (always checks for a newer copy first).
 // Data from Google (sign-in, events, prayer…) is never stored here.
-const CACHE = 'lighthouse-app-v2';
+const CACHE = 'lighthouse-app-v3';
 const FILES = ['./', 'index.html', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png', 'icons/favicon.png'];
 
 self.addEventListener('install', function (e) {
@@ -10,7 +10,8 @@ self.addEventListener('install', function (e) {
 
 self.addEventListener('activate', function (e) {
   e.waitUntil(caches.keys().then(function (keys) {
-    return Promise.all(keys.filter(function (k) { return k !== CACHE; }).map(function (k) { return caches.delete(k); }));
+    // Only Lighthouse's own old copies: other apps on the same github.io address keep theirs.
+    return Promise.all(keys.filter(function (k) { return k.indexOf('lighthouse-') === 0 && k !== CACHE; }).map(function (k) { return caches.delete(k); }));
   }).then(function () { return self.clients.claim(); }));
 });
 
