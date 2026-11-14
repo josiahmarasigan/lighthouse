@@ -2004,6 +2004,8 @@ window.__LH_APP__ = function () {
     servingSchedule: ['serving'], giving: ['giving'], installApp: ['install'], wellness: ['wellness'] };
 
   function go(route, params, replace) {
+    // "Install on my phone": where the phone allows it (Android/Chrome), show its install prompt right away.
+    if (route === 'install' && STATIC && !replace && installPromptEvent) { triggerInstall(); return; }
     if (route !== 'customizeNav') navDraft = null;
     if (route !== 'homePrefs') homeDraft = null;
     if (!ROUTES[route]) route = state.user ? 'home' : 'welcome';
@@ -3649,6 +3651,8 @@ window.__LH_APP__ = function () {
   function moduleVisible(m) {
     // "Would you like to serve?" opens the Serve page (questionnaire first), so My serving schedule isn't listed twice.
     if (m.key === 'servingSchedule' && FEATURES.volunteer !== false) return false;
+    // Already opened from the home screen: nothing left to install.
+    if (m.key === 'installApp' && STATIC && STANDALONE) return false;
     return m.always || FEATURES[m.feature || m.key] !== false;
   }
 
@@ -5735,6 +5739,15 @@ window.__LH_APP__ = function () {
     installPromptEvent = e;
     if (state.route === 'install' && document.getElementById('main')) document.getElementById('main').innerHTML = viewInstall();
   });
+  function triggerInstall() {
+    if (!installPromptEvent) return go('install', {}, true);
+    const ev = installPromptEvent;
+    try { ev.prompt(); } catch (e) { return go('install', {}, true); }
+    ev.userChoice.then(function (choice) {
+      if (choice && choice.outcome === 'accepted') installPromptEvent = null;
+      if (state.route === 'install') document.getElementById('main').innerHTML = viewInstall();
+    }).catch(function () { /* ignore */ });
+  }
   window.addEventListener('appinstalled', function () { installPromptEvent = null; toast(t('in.static.done'), 4000); });
 
   function viewInstall() {
@@ -8457,15 +8470,7 @@ window.__LH_APP__ = function () {
       }
     },
 
-    installApp: function () {
-      if (!installPromptEvent) return;
-      const ev = installPromptEvent;
-      ev.prompt();
-      ev.userChoice.then(function () {
-        installPromptEvent = null;
-        if (state.route === 'install') document.getElementById('main').innerHTML = viewInstall();
-      }).catch(function () { /* ignore */ });
-    },
+    installApp: function () { triggerInstall(); },
     hsMove: function (el) {
       const key = el.getAttribute('data-key');
       const dir = Number(el.getAttribute('data-dir'));
