@@ -1171,6 +1171,10 @@ details.ans-group[open] > summary::after { content: '▴'; }
 .hs-row .ll-title { font-size: .95rem; line-height: 1.25; }
 .hs-row.is-off .ll-title, .hs-row.is-off .card-icon { opacity: .55; }
 @media (max-width: 420px) { .ns-body { padding-left: 0; } }
+
+/* Event page: emails sent about this event */
+.ev-log { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.ev-log li { padding: 10px 12px; border-radius: 12px; background: var(--soft, #F4EFE4); line-height: 1.4; }
 </style>
 
   <style>
@@ -3019,10 +3023,31 @@ window.__LH_APP__ = function () {
           '</div>' +
         '</section>' +
         '<div id="rsvp-box">' + rsvpHtml(ev) + '</div>' +
+        (ev.isOrganizer || isAdmin() ? '<div id="ev-email-log"></div>' : '') +
         eventServeHtml(ev) +
         (ev.description ? '<section class="card"><h2>' + esc(t('ev.about')) + '</h2><p class="body-text">' + nl2br(esc(ev.description)) + '</p></section>' : '') +
       '</div>';
     focusHeading();
+    if (ev.isOrganizer || isAdmin()) loadEventEmailLog(ev.id);
+  }
+
+  /** Organizer/admin: the emails sent about this event (when, how many, by whom). */
+  async function loadEventEmailLog(id) {
+    let d;
+    try { d = await api('events.emailLog', { id: id }); } catch (e) { return; }
+    const box = document.getElementById('ev-email-log');
+    if (!box || state.params.id !== id || !d.items.length) return;
+    box.innerHTML = '<section class="card"><h2>📧 ' + esc(t('ev.log.title')) + '</h2><ul class="plain-list ev-log">' +
+      d.items.map(function (x) {
+        let state2 = '';
+        if (x.status === 'waiting') state2 = t('ev.log.waiting', { time: x.after });
+        else if (x.status === 'skipped') state2 = t('ev.log.skipped');
+        else if (x.status === 'stopped') state2 = t('ev.log.stopped');
+        else if (x.pending) state2 = t('ev.log.pending', { n: x.pending });
+        return '<li><strong>' + esc(t('ev.log.' + x.kind)) + '</strong><br>' +
+          '<span class="muted small">' + esc(t('ev.log.line', { sent: x.sent, total: x.total, at: x.at, by: x.by || '—' })) + '</span>' +
+          (state2 ? '<br><span class="small">' + esc(state2) + '</span>' : '') + '</li>';
+      }).join('') + '</ul></section>';
   }
 
   /**
@@ -3560,7 +3585,11 @@ window.__LH_APP__ = function () {
         d.fields.filter(function (f) { return !(x.key === 'groups' && f.key === 'leaderUserId' && !isAdmin()); })
           .map(function (f) { return cmsField(f, item ? values[f.key] : f.def); }).join('') +
         (x.key === 'events' ? '<div class="field notify-tick">' + checkRow('__notify', '🔔 ' + t('ev.notifyTick'), !id) +
-          '<span class="hint">' + esc(id ? t('ev.notifyHelpEdit') : t('ev.notifyHelpNew')) + '</span></div>' : '') +
+          '<span class="hint">' + esc(id ? t('ev.notifyHelpEdit2') : t('ev.notifyHelpNew2')) + '</span></div>' +
+          (item && item.emailed
+            ? '<p class="muted small notify-tick">📧 ' + esc(t('ev.emailedOnce')) + '</p>'
+            : '<div class="field notify-tick">' + checkRow('__emailAll', '📧 ' + t('ev.emailAllTick'), !id) +
+                '<span class="hint">' + esc(t('ev.emailAllHelp') + (isAdmin() ? '' : ' ' + t('ev.emailAllLeader'))) + '</span></div>') : '') +
         '<button type="submit" class="btn btn-primary btn-block btn-lg">' + esc(id ? t('mg.saveChanges') : (x.key === 'groups' && !isAdmin() ? t('lg.ap.submit') : t('mg.add.' + x.key))) + '</button>' +
       '</form>' +
       (id && d.canDelete
@@ -7898,7 +7927,7 @@ window.__LH_APP__ = function () {
     dataCache = {};
     cmsData = {};
     syncLanguage(data.user);
-    go('home', {}, true);
+    goStart();
   }
 
   function handleSignedOut(message) {
@@ -8034,7 +8063,8 @@ window.__LH_APP__ = function () {
       const d = formData(form);
       const type = d.__type, id = d.__id;
       const notify = d.__notify === true;
-      delete d.__type; delete d.__id; delete d.__notify;
+      const emailAll = d.__emailAll === true;
+      delete d.__type; delete d.__id; delete d.__notify; delete d.__emailAll;
       delete d.cat;
       Array.prototype.forEach.call(form.querySelectorAll('[data-checklist]'), function (el) {
         const k = el.getAttribute('data-checklist');
@@ -8043,10 +8073,10 @@ window.__LH_APP__ = function () {
       });
       Object.keys(d).forEach(function (k) { if (k === '' ) delete d[k]; });
       return withBusy(form, t('busy.saving'), async function () {
-        const res = await api('cms.save', { type: type, id: id, values: d, notify: notify });
+        const res = await api('cms.save', { type: type, id: id, values: d, notify: notify, emailAll: emailAll });
         (MANAGE_REFRESH[type] || []).forEach(function (k) { invalidate(k); });
         delete cmsData[type];
-        toast(res.message, 3500);
+        toast(res.message, type === 'events' ? 7000 : 3500);
         if (type === 'groups') { groupsData = null; invalidate('dash', 'mgCounts'); }
         go('manageList', { key: type });
       });
@@ -9273,6 +9303,8 @@ window.__LH_APP__ = function () {
       return;
     }
     setupHistory();
+    // A link from an event email (?event=<id>) opens that event once signed in.
+    if (BOOT.openEvent && !state.openEventDone) state.openEvent = String(BOOT.openEvent).slice(0, 60);
     if (BOOT.page === 'guest' && !state.pageHandled) {
       state.pageHandled = true;
       state.token = store.get('lh_token');
@@ -9288,7 +9320,7 @@ window.__LH_APP__ = function () {
       const known = savedUser();
       if (known) {
         state.user = known;
-        go('home', {}, true);
+        goStart();
         api('session.me').then(function (data) {
           const changed = JSON.stringify(data.user) !== JSON.stringify(state.user);
           state.user = data.user;
@@ -9306,7 +9338,7 @@ window.__LH_APP__ = function () {
         state.user = data.user;
         rememberUser(data.user);
         syncLanguage(data.user);
-        go('home', {}, true);
+        goStart();
         return;
       } catch (err) {
         if (err.code === 'AUTH') return; // handleSignedOut already showed the welcome page
@@ -9315,6 +9347,17 @@ window.__LH_APP__ = function () {
       }
     }
     go('welcome', {}, true);
+  }
+
+  /** First screen after signing in: an event from an email link, else Home. */
+  function goStart() {
+    if (state.openEvent && FEATURES.events !== false) {
+      const id = state.openEvent;
+      state.openEvent = null;
+      state.openEventDone = true;
+      return go('event', { id: id }, true);
+    }
+    go('home', {}, true);
   }
 
   async function boot() {
@@ -9359,6 +9402,7 @@ window.__LH_APP__ = function () {
       started = true;
       boot.apiUrl = API;
       boot.page = String(qs.get('page') || '').slice(0, 30);
+      boot.openEvent = String(qs.get('event') || '').replace(/[^\w-]/g, '').slice(0, 60);
       boot.inShell = false;
       window.__LH_BOOT__ = boot;
       try { window.__LH_APP__(); } finally { setTimeout(hideSplash, 200); }
