@@ -1529,10 +1529,36 @@ window.__LH_APP__ = function () {
     let c = dataCache[key];
     if (!c) { c = readSaved(key); if (c) dataCache[key] = c; }
     if (c && Date.now() - c.t < ttlMs) return c.v;
-    // Right after the person changed something, wait for fresh data instead of flashing the old copy.
-    if (c && c.t < lastWriteAt && Date.now() - lastWriteAt < 20000) return fetchStore(key, fetcher);
+    // Right after the person changed something: on the screen where they made the change, wait for
+    // fresh data (so their change shows). On other screens, wait at most a moment, then show the saved
+    // copy and let the quiet refresh redraw it.
+    if (c && c.t < lastWriteAt && Date.now() - lastWriteAt < 20000) {
+      if (state.route === lastWriteRoute) return fetchStore(key, fetcher);
+      const fresh = fetchStore(key, fetcher);
+      const seq = renderSeq;
+      return Promise.race([fresh, new Promise(function (r) { setTimeout(function () { r(NOT_YET); }, 500); })]).then(function (v) {
+        if (v !== NOT_YET) return v;
+        bgFetching++;
+        const before = JSON.stringify(c.v);
+        fresh.then(function (nv) {
+          bgFetching--;
+          if (JSON.stringify(nv) !== before && seq === renderSeq && usedKeys.seq === seq && usedKeys.keys[key]) softRerender(seq);
+        }, function () { bgFetching--; });
+        return c.v;
+      });
+    }
     if (c) { refreshQuietly(key, fetcher, c); return c.v; }   // show the saved copy now
     return fetchStore(key, fetcher);
+  }
+  const NOT_YET = {};
+
+  /**
+   * Leader and personal screens: kept in memory only (never saved on the phone), shown at once
+   * when reopened and refreshed quietly. ttl = how long a copy counts as fresh.
+   */
+  function cachedApi(action, payload, ttlMs) {
+    const key = 'api:' + action + ':' + JSON.stringify(payload || {});
+    return cached(key, ttlMs || 15000, function () { return api(action, payload || {}); });
   }
   function refreshQuietly(key, fetcher, old) {
     if (inflight[key]) return;
@@ -1571,9 +1597,10 @@ window.__LH_APP__ = function () {
     });
   }
   /** After any change, every saved copy is still shown but refreshed the next time it's opened. */
-  let lastWriteAt = 0;
+  let lastWriteAt = 0, lastWriteRoute = '';
   function markAllStale() {
     lastWriteAt = Date.now();
+    lastWriteRoute = state.route;
     Object.keys(dataCache).forEach(function (k) { if (dataCache[k]) dataCache[k].t = 0; });
   }
 
@@ -1582,23 +1609,50 @@ window.__LH_APP__ = function () {
    * first tap on each is instant. Uses the same saved copies as the screens themselves.
    */
   let prefetched = false;
+  /**
+   * "Starter pack": right after Home, load every menu screen this person can open in ONE trip to
+   * Google (app.batch), so switching between them is instant. Each answer fills the same saved copy
+   * the screen itself uses; screens that are already fresh are skipped.
+   */
   function prefetchMyTabs() {
     if (prefetched || !state.user) return;
     prefetched = true;
-    const getters = {
-      events: getEvents, sermons: getSermons, announcements: getAnnouncements, readings: getReadings,
-      prayer: function () { return getPrayer('wall'); }, smallGroups: getGroups, servingSchedule: getServe,
-      devotional: function () { return getDevo(''); }, giving: getGiving, birthdays: getBirthdays,
-      wellness: getWellnessHome, testimonies: getTestimonies
-    };
+    const u = state.user;
+    const isLeader = u.role === 'leader' || u.role === 'admin';
+    const want = [
+      ['events', 120000, 'events.list', {}, 'events'],
+      ['sermons', 300000, 'sermons.all', {}, 'sermons'],
+      ['prayer_wall', 30000, 'prayer.list', { tab: 'wall' }, 'prayer'],
+      ['announcements', 120000, 'announcements.list', {}, 'announcements'],
+      ['serve', 60000, 'serve.board', {}, 'servingSchedule'],
+      ['groups', 120000, 'groups.list', {}, 'smallGroups'],
+      ['devo_today', 300000, 'devo.today', { id: '' }, 'devotional'],
+      ['readings', 300000, 'readings.list', {}, 'readings'],
+      ['birthdays', 300000, 'birthdays.list', {}, 'birthdays'],
+      ['testimonies', 120000, 'testimonies.list', {}, 'testimonies'],
+      ['giving', 600000, 'giving.get', {}, 'giving']
+    ];
+    if (isLeader) want.unshift(['mgCounts', 15000, 'manage.counts', {}, '']);
     const run = function () {
-      myNavKeys().forEach(function (k) {
-        const o = navOption(k);
-        if (!getters[k] || (o && !navAllowed(o))) return;
-        getters[k]().catch(function () { /* the screen will try again when opened */ });
+      const list = want.filter(function (w) {
+        if (w[4] && FEATURES[w[4]] === false) return false;
+        const c = dataCache[w[0]] || readSaved(w[0]);
+        return !(c && Date.now() - c.t < w[1]) && !inflight[w[0]];
+      }).slice(0, 12);
+      if (!list.length) return;
+      const batch = api('app.batch', { calls: list.map(function (w) { return { a: w[2], p: w[3] }; }) });
+      list.forEach(function (w, i) {
+        fetchStore(w[0], function () {
+          return batch.then(function (res) {
+            const r = res && res[i];
+            if (!r || !r.ok) throw makeError((r && r.error) || t('err.default'), r && r.code);
+            return r.data;
+          });
+        }).catch(function () { /* the screen will try again when opened */ });
       });
     };
-    if (window.requestIdleCallback) window.requestIdleCallback(run, { timeout: 2500 }); else setTimeout(run, 1200);
+    // Soon after Home is on screen (not waiting for the phone to be idle: this is what makes taps instant).
+    setTimeout(run, 300);
   }
 
   /* ---------- Page loading: ignores results if the person already moved on ---------- */
@@ -1832,7 +1886,7 @@ window.__LH_APP__ = function () {
       if (code === 'AUTH') handleSignedOut(res.error);
       throw makeError((res && res.error) || t('err.default'), code);
     }
-    if (res.w && !bgFetching) markAllStale();
+    if (res.w) markAllStale();
     return res.data;
   }
 
@@ -3036,8 +3090,16 @@ window.__LH_APP__ = function () {
     let d;
     try { d = await api('events.emailLog', { id: id }); } catch (e) { return; }
     const box = document.getElementById('ev-email-log');
-    if (!box || state.params.id !== id || !d.items.length) return;
-    box.innerHTML = '<section class="card"><h2>📧 ' + esc(t('ev.log.title')) + '</h2><ul class="plain-list ev-log">' +
+    if (!box || state.params.id !== id) return;
+    const remind = '<section class="card ev-remind"><h2>📣 ' + esc(t('ev.rm.title')) + '</h2>' +
+      '<p class="muted small">' + esc(t('ev.rm.sub')) + '</p>' +
+      '<fieldset class="field"><legend class="sr-only">' + esc(t('ev.rm.who')) + '</legend>' +
+        '<label class="choice"><input type="radio" name="rmAudience" value="signups" checked><span><strong>' + esc(t('ev.rm.signups')) + '</strong></span></label>' +
+        '<label class="choice"><input type="radio" name="rmAudience" value="all"><span><strong>' + esc(t('ev.rm.all')) + '</strong><br><span class="muted small">' + esc(t('ev.rm.allSub')) + '</span></span></label>' +
+      '</fieldset>' +
+      '<button type="button" class="btn btn-soft btn-block" data-action="eventRemind" data-id="' + esc(id) + '">📧 ' + esc(t('ev.rm.send')) + '</button></section>';
+    if (!d.items.length) { box.innerHTML = remind; return; }
+    box.innerHTML = remind + '<section class="card"><h2>📧 ' + esc(t('ev.log.title')) + '</h2><ul class="plain-list ev-log">' +
       d.items.map(function (x) {
         let state2 = '';
         if (x.status === 'waiting') state2 = t('ev.log.waiting', { time: x.after });
@@ -3121,7 +3183,7 @@ window.__LH_APP__ = function () {
   }
   async function afterEventRequests() {
     if (!isLeader()) return;
-    const d = await load(function () { return api('events.requests', { eventId: state.params.id || '' }); });
+    const d = await load(function () { return cachedApi('events.requests', { eventId: state.params.id || '' }); });
     if (!d) return;
     renderEventRequests(d);
   }
@@ -3204,7 +3266,7 @@ window.__LH_APP__ = function () {
       '<div id="view-body">' + skelCards(2) + '</div>';
   }
   async function afterNotifyPrefs() {
-    const d = await load(function () { return api('notify.get'); });
+    const d = await load(function () { return cachedApi('notify.get'); });
     if (!d) return;
     const sw = function (name, on, label, disabled) {
       return '<label class="toggle"><input type="checkbox" role="switch" name="' + name + '"' + (on ? ' checked' : '') + (disabled ? ' disabled' : '') +
@@ -3474,7 +3536,7 @@ window.__LH_APP__ = function () {
 
   async function loadCms(type, fresh) {
     if (!fresh && cmsData[type]) return cmsData[type];
-    const d = await api('cms.list', { type: type });
+    const d = await cachedApi('cms.list', { type: type });
     cmsData[type] = d;
     return d;
   }
@@ -4259,7 +4321,7 @@ window.__LH_APP__ = function () {
   /* ---------------- People ---------------- */
   async function getPeople(fresh) {
     if (!fresh && peopleData) return peopleData;
-    peopleData = await api('people.list');
+    peopleData = await cachedApi('people.list', {});
     return peopleData;
   }
 
@@ -4379,7 +4441,7 @@ window.__LH_APP__ = function () {
 
   async function afterPerson() {
     if (!isLeader()) return;
-    const d = await load(function () { return api('people.get', { id: state.params.id }); });
+    const d = await load(function () { return cachedApi('people.get', { id: state.params.id }); });
     if (!d) return;
     const p = d.person, o = d.options;
     const months = tList('date.months');
@@ -4473,7 +4535,7 @@ window.__LH_APP__ = function () {
 
   async function afterPipeline() {
     if (!isLeader()) return;
-    const d = await load(function () { return api('pipeline.list'); });
+    const d = await load(function () { return cachedApi('pipeline.list'); });
     if (!d) return;
     pipelineData = d;
     renderPipeline();
@@ -4544,7 +4606,7 @@ window.__LH_APP__ = function () {
   }
   async function afterSettings() {
     if (!isAdmin()) return;
-    const d = await load(function () { return api('config.list'); });
+    const d = await load(function () { return cachedApi('config.list'); });
     if (!d) return;
     cfgData = d;
     document.getElementById('view-body').innerHTML =
@@ -4605,7 +4667,7 @@ window.__LH_APP__ = function () {
   }
   async function afterFeatures() {
     if (!isAdmin()) return;
-    const d = await load(function () { return api('config.list'); });
+    const d = await load(function () { return cachedApi('config.list'); });
     if (!d) return;
     const val = {};
     d.items.forEach(function (x) { val[x.key] = /^true$/i.test(x.value); });
@@ -4716,7 +4778,7 @@ window.__LH_APP__ = function () {
   }
   async function afterQAdmin() {
     if (!isAdmin()) return;
-    const d = await load(function () { return api('questions.list', { form: state.params.key || 'gifts' }); });
+    const d = await load(function () { return cachedApi('questions.list', { form: state.params.key || 'gifts' }); });
     if (!d) return;
     qaData = d;
     renderQAdmin();
@@ -4992,7 +5054,7 @@ window.__LH_APP__ = function () {
   }
   async function afterGroupRequests() {
     if (!isLeader()) return;
-    const d = await load(function () { return api('groups.requests'); });
+    const d = await load(function () { return cachedApi('groups.requests'); });
     if (!d) return;
     const body = document.getElementById('view-body');
     if (!d.items.length) { body.innerHTML = emptyCard('🌱', d.isAdmin || d.myGroups.length ? t('lg.noRequests') : t('lg.noGroup')); return; }
@@ -5117,7 +5179,7 @@ window.__LH_APP__ = function () {
   }
   async function afterGuests() {
     if (!isLeader()) return;
-    const d = await load(function () { return api('guests.list'); });
+    const d = await load(function () { return cachedApi('guests.list'); });
     if (!d) return;
     guestsData = d;
     renderGuests();
@@ -5168,7 +5230,7 @@ window.__LH_APP__ = function () {
   }
   async function afterCare() {
     if (!isLeader()) return;
-    const d = await load(function () { return api('care.list'); });
+    const d = await load(function () { return cachedApi('care.list'); });
     if (!d) return;
     const reach = d.items.filter(function (i) { return !i.recentlyCared; });
     const cared = d.items.filter(function (i) { return i.recentlyCared; });
@@ -5275,7 +5337,7 @@ window.__LH_APP__ = function () {
       '<div id="view-body" style="margin-top:14px">' + skelCards(3) + '</div>';
   }
   async function afterDirectory() {
-    const d = await load(function () { return api('directory.list'); });
+    const d = await load(function () { return cachedApi('directory.list'); });
     if (!d) return;
     dirData = d;
     document.getElementById('view-body').innerHTML =
@@ -5307,7 +5369,7 @@ window.__LH_APP__ = function () {
       '<div id="view-body">' + skelCards(1) + '</div>';
   }
   async function afterDirectoryMe() {
-    const d = await load(function () { return api('directory.mine'); });
+    const d = await load(function () { return cachedApi('directory.mine'); });
     if (!d) return;
     const p = d.profile;
     document.getElementById('view-body').innerHTML =
@@ -5479,11 +5541,14 @@ window.__LH_APP__ = function () {
     const body = document.getElementById('view-body');
     if (!d || !body) return;
     if (!d.ministries.length) { body.innerHTML = emptyCard('🙌', t('srv.noMinistries')); return; }
-    body.innerHTML = '<p class="muted small" style="margin:0 0 12px">' + esc(t('srv.teamsIntro')) + '</p><div class="stack">' + d.ministries.map(function (m) {
+    const atMax = d.teamMax && d.teamCount >= d.teamMax;
+    body.innerHTML = '<p class="muted small" style="margin:0 0 12px">' + esc(t('srv.teamsIntro')) + ' ' +
+      esc(t('srv.teamCount', { n: d.teamCount || 0, max: d.teamMax || 2 })) + '</p><div class="stack">' + d.ministries.map(function (m) {
       let act = '';
       if (m.myStatus === 'member') act = '<p class="rsvp-state ok">✔ ' + esc(t('srv.onTeam')) + '</p><button type="button" class="linklike small" data-action="teamLeave" data-id="' + esc(m.id) + '">' + esc(t('srv.leaveTeam')) + '</button>';
       else if (m.myStatus === 'requested') act = '<p class="rsvp-state">⏳ ' + esc(t('srv.teamPending')) + '</p><button type="button" class="linklike small" data-action="teamLeave" data-id="' + esc(m.id) + '">' + esc(t('srv.cancelAsk')) + '</button>';
       else if (serveLocked()) act = lockedBtn();
+      else if (atMax) act = '<p class="muted small">🔒 ' + esc(t('srv.teamAtMax', { max: d.teamMax })) + '</p>';
       else {
         act = (m.myStatus === 'declined' ? '<p class="muted small">' + esc(t('srv.teamDeclined')) + '</p>' + (m.myNote ? '<blockquote class="greet-msg"><p>' + nl2br(esc(m.myNote)) + '</p></blockquote>' : '') : '') +
           '<details class="srv-msg"><summary class="linklike small">' + esc(t('srv.addMsg')) + '</summary><textarea class="input" rows="2" maxlength="300" data-tnote="' + esc(m.id) + '" aria-label="' + esc(t('srv.msgLead')) + '" placeholder="' + esc(t('srv.teamMsgPh')) + '"></textarea></details>' +
@@ -5582,7 +5647,7 @@ window.__LH_APP__ = function () {
   }
   async function afterServeManage() {
     if (!isLeader()) return;
-    const d = await load(function () { return api('serve.manage'); });
+    const d = await load(function () { return cachedApi('serve.manage'); });
     if (!d) return;
     const body = document.getElementById('view-body');
     if (!body) return;
@@ -5646,7 +5711,7 @@ window.__LH_APP__ = function () {
   }
   async function afterRota() {
     if (!isLeader()) return;
-    const d = await load(function () { return api('rota.list'); });
+    const d = await load(function () { return cachedApi('rota.list'); });
     if (!d) return;
     rotaData = d;
     renderRota();
@@ -5693,7 +5758,7 @@ window.__LH_APP__ = function () {
   }
   async function afterRotaEdit() {
     if (!isLeader()) return;
-    const d = rotaData || await load(function () { return api('rota.list'); });
+    const d = rotaData || await load(function () { return cachedApi('rota.list'); });
     if (!d) return;
     rotaData = d;
     const s = d.slots.find(function (x) { return x.id === state.params.id; }) || { ministry: '', role: '', date: todayKey(), startTime: '09:00', endTime: '', leaderUserId: state.user.id, notes: '', spots: 2, autoApprove: false, kind: 'sunday', title: '', eventId: '' };
@@ -6180,7 +6245,7 @@ window.__LH_APP__ = function () {
       '<div id="view-body">' + skelCards(2) + '</div>';
   }
   async function afterWellnessLabs() {
-    const d = await load(function () { return api('wellness.labs'); });
+    const d = await load(function () { return cachedApi('wellness.labs'); });
     if (!d) return;
     wlLabsData = d;
     renderWellnessLabs();
@@ -6227,7 +6292,7 @@ window.__LH_APP__ = function () {
       '<div id="view-body">' + skelCards(2) + '</div>';
   }
   async function afterWellnessBody() {
-    const d = await load(function () { return api('wellness.body'); });
+    const d = await load(function () { return cachedApi('wellness.body'); });
     if (!d) return;
     wlBodyData = d;
     renderWellnessBody();
@@ -6446,7 +6511,7 @@ window.__LH_APP__ = function () {
   }
   async function afterWellnessFlags() {
     if (!isWellnessStaff()) return;
-    const d = await load(function () { return api('wellness.flags', { resolved: wlFlagsTab === 'resolved' }); });
+    const d = await load(function () { return cachedApi('wellness.flags', { resolved: wlFlagsTab === 'resolved' }); });
     if (!d) return;
     wlFlagsData = d;
     renderWellnessFlags();
@@ -6480,7 +6545,7 @@ window.__LH_APP__ = function () {
   }
   async function afterWellnessLabRanges() {
     if (!isWellnessStaff()) return;
-    const d = await load(function () { return api('wellness.labTests'); });
+    const d = await load(function () { return cachedApi('wellness.labTests'); });
     if (!d) return;
     renderWellnessLabRanges(d.tests);
   }
@@ -6507,7 +6572,7 @@ window.__LH_APP__ = function () {
   }
   async function afterWellnessAdmin() {
     if (!isAdmin()) return;
-    const d = await load(function () { return api('wellness.team'); });
+    const d = await load(function () { return cachedApi('wellness.team'); });
     if (!d) return;
     wlAdminData = d;
     renderWellnessAdmin();
@@ -7344,7 +7409,7 @@ window.__LH_APP__ = function () {
   }
   async function afterHealthHistoryTotals() {
     if (!isWellnessStaff()) return;
-    const d = await load(function () { return api('hh.totals'); });
+    const d = await load(function () { return cachedApi('hh.totals'); });
     if (!d) return;
     hhTotalsData = d;
     renderHealthHistoryTotals();
@@ -7729,7 +7794,7 @@ window.__LH_APP__ = function () {
   }
 
   async function afterQHub() {
-    const d = await load(function () { return api('q.mine'); });
+    const d = await load(function () { return cachedApi('q.mine'); });
     if (!d) return;
     const body = document.getElementById('view-body');
     body.innerHTML = d.forms.length ? formListHtml(d.forms) +
@@ -8501,6 +8566,26 @@ window.__LH_APP__ = function () {
     },
 
     installApp: function () { triggerInstall(); },
+    eventRemind: async function (el) {
+      const id = el.getAttribute('data-id');
+      const pick = document.querySelector('input[name="rmAudience"]:checked');
+      const audience = pick ? pick.value : 'signups';
+      if (el.getAttribute('data-armed') !== audience) {
+        const original = el.textContent;
+        el.setAttribute('data-armed', audience);
+        el.textContent = t(audience === 'all' ? 'ev.rm.confirmAll' : 'ev.rm.confirmSignups');
+        setTimeout(function () {
+          if (document.body.contains(el)) { el.removeAttribute('data-armed'); el.textContent = original; }
+        }, 6000);
+        return;
+      }
+      el.disabled = true;
+      try {
+        const res = await api('events.remind', { id: id, audience: audience });
+        toast(res.message, 6000);
+        loadEventEmailLog(id);
+      } catch (e) { toast(e.message, 6000); el.disabled = false; }
+    },
     hsMove: function (el) {
       const key = el.getAttribute('data-key');
       const dir = Number(el.getAttribute('data-dir'));
