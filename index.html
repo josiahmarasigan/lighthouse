@@ -1331,25 +1331,6 @@ window.__LH_APP__ = function () {
    * 3. Language helpers
    * ======================================================= */
 
-  /**
-   * The app page starts from start-up data saved on the phone (instant opening) and asks Google for
-   * a fresh copy in the background. When that copy has new or changed words (an update was just
-   * installed), use them right away and redraw the screen, so nobody sees raw keys like "ev.rm.title".
-   */
-  window.__LH_ON_BOOT__ = function (fresh) {
-    try {
-      if (!fresh || !fresh.i18n || fresh.i18nVersion === BOOT.i18nVersion) return;
-      BOOT.i18nVersion = fresh.i18nVersion;
-      Object.keys(I18N).forEach(function (l) { if (!fresh.i18n[l]) delete I18N[l]; });   // other languages: fetch the new copy
-      Object.keys(fresh.i18n).forEach(function (l) { I18N[l] = fresh.i18n[l]; });
-      ensureLang(state.lang).then(function () {
-        const a = document.activeElement;
-        const typing = a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.tagName === 'SELECT');
-        if (state.route && !typing) render();   // while typing, the next screen gets the new words
-      });
-    } catch (e) { /* keep the words we have */ }
-  };
-
   /** Translate a key. {placeholders} are filled from vars. */
   function t(key, vars) {
     let s = (I18N[state.lang] || {})[key];
@@ -9715,9 +9696,7 @@ window.__LH_APP__ = function () {
     try { saved = JSON.parse(localStorage.getItem(BOOT_KEY) || 'null'); } catch (e) { saved = null; }
     if (saved && saved.data && saved.data.config && Date.now() - saved.at < 14 * 86400000) {
       start(saved.data);
-      // Fresh copy for next time; if an update brought new words, the app uses them right away.
-      fetchBoot().then(function (fresh) { if (window.__LH_ON_BOOT__) window.__LH_ON_BOOT__(fresh); })
-        .catch(function () { /* offline: keep the saved copy */ });
+      fetchBoot().catch(function () { /* offline: keep the saved copy */ });
       return;
     }
     if (navigator.onLine === false) {
