@@ -1,21 +1,16 @@
 {
-  "name": "SIMC Radiology Portal",
-  "short_name": "SIMC Radiology",
-  "description": "Siargao Island Medical Center – Radiology Division portal: results, requests, guidelines and the radiologist on duty.",
-  "id": "./",
+  "name": "Lighthouse Siargao",
+  "short_name": "Lighthouse",
+  "description": "The Lighthouse Siargao church community app",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
-  "display_override": ["standalone", "minimal-ui"],
-  "orientation": "any",
-  "background_color": "#10344e",
-  "theme_color": "#10344e",
-  "lang": "en",
-  "categories": ["medical", "productivity"],
+  "orientation": "portrait",
+  "background_color": "#1F3A5F",
+  "theme_color": "#1F3A5F",
   "icons": [
     { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
     { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
-    { "src": "icons/maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
-    { "src": "icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ]
 }

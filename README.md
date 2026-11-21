@@ -1,28 +1,53 @@
-# SIMC Radiology Portal (GitHub Pages)
+# Lighthouse app page
 
-The portal's screens live here. Logins, patient lists and results come from the Google Apps Script web app
-(the `/exec` link written near the top of `index.html` as `window.PORTAL_API`) through its `doPost` function.
-Nothing from Google is shown inside a frame, so phones signed in to several Google accounts work.
+This small website turns the Lighthouse church app into an app people can install on their phones: it gets the Lighthouse logo on the home screen, opens full screen and shows a splash while it loads. The church app itself still runs on Google Apps Script; this page only holds it.
 
-## Files
-* `index.html` – the portal (same file as Apps Script `Index.html`).
-* `pacs.html` – the X-ray PACS (upload + reading). Opened from the portal's "🩻 X-ray PACS" button; same login and server.
+It is free. GitHub Pages hosts it at no cost.
 
-## Updating
-1. Paste the new **Index.html** from Apps Script over `index.html` here (same content).
-2. Upload a new `pacs.html` too when it changes.
-3. In `sw.js`, change `VERSION` (e.g. `simc-portal-v3`) so installed apps pick it up quickly.
-4. Commit. GitHub Pages republishes in about a minute.
+## What's in this folder
 
-## Apps Script side
-* Deploy → Manage deployments → edit the existing deployment → **Who has access: Anyone** → Version: New version → Deploy.
-  (Keep the same deployment so the `/exec` link stays the same. If you make a NEW deployment, paste its link into `index.html`.)
-* In the CONFIG sheet, set **APP_URL** to this site's address.
+| File | What it does |
+|---|---|
+| `index.html` | The app page. **You change one line in it**: your web app link. |
+| `manifest.webmanifest` | Tells phones the app's name, colours and icon. |
+| `sw.js` | Keeps the page and logo saved on the phone so the splash opens quickly. |
+| `icons/` | The Lighthouse logo in the sizes phones need. |
 
-## Ultrasound / CT reporting (PACS → 📝 US / CT tab)
-- Each radiologist gets three folders automatically (Generated, Ultrasound, CT scan), tracked in the RAD_FOLDERS sheet.
-  New radiologists get theirs on the next "Set up/update sheets" or "🩻 Portal → Create radiologist folders now".
-- The report generator saves Google Docs into the radiologist's **Generated** folder.
-- In the PACS page the radiologist edits Findings / Impression (one item per line), saves, previews, and finalizes.
-  Finalizing moves the Doc to their Ultrasound or CT scan folder, which the portal already searches.
-- Templates are shared with X-ray ("Save as my template"), filtered by modality.
+## Setting it up (about 15 minutes, one time)
+
+### 1. Get your web app link
+In Apps Script: **Deploy → Manage deployments**. Copy the **Web app** URL. It ends in `/exec`.
+
+### 2. Paste it into index.html
+Open `index.html` in any text editor (on a phone, the GitHub editor works too). Near the top, find:
+
+```
+window.LIGHTHOUSE_APP_URL = 'PASTE_YOUR_WEB_APP_URL_HERE';
+```
+
+Replace `PASTE_YOUR_WEB_APP_URL_HERE` with your link. Keep the quote marks. Save.
+
+### 3. Put the files on GitHub
+1. Go to github.com and create a free account (a church email is a good choice).
+2. Tap **+** (top right) → **New repository**. Name it `lighthouse`. Choose **Public**. Tap **Create repository**.
+3. Tap **uploading an existing file**. Drag in **everything inside this folder**, including the `icons` folder. Tap **Commit changes**.
+4. Open **Settings → Pages**. Under **Build and deployment**, choose **Deploy from a branch**, branch **main**, folder **/ (root)**. Tap **Save**.
+5. Wait 1–2 minutes and refresh. GitHub shows your link, for example `https://yourname.github.io/lighthouse/`.
+
+### 4. Tell the church app about the page
+In Lighthouse: **Manage → Settings → APP_SHELL_URL**. Paste the GitHub link from step 3 (with `https://` and the `/` at the end). Save.
+
+From then on, emails and "copy link" buttons point to the app page, and only that page may show Lighthouse inside it.
+
+### 5. Try it
+- **Android (Chrome):** open the link and tap **Install** on the blue bar (or ⋮ → **Install app**).
+- **iPhone (Safari):** open the link, tap **Share** → **Add to Home Screen**.
+- Open the new icon, sign in, and move around for a minute.
+
+## Good to know
+- **Updates to the church app need no changes here.** When you deploy a new version in Apps Script, the installed app shows it next time it opens.
+- **Keep the same deployment.** Always use **Manage deployments → Edit → New version**, never **New deployment**: a new deployment gets a different link and the app page would point at the old one.
+- **Changing the logo:** replace the files in `icons/` with ones of the same names and sizes.
+- **Messenger links:** when someone opens the link inside Messenger or Facebook, the app shows a screen asking them to open it in Chrome or Safari, where they can install it.
+- **A small Google notice** ("created by a Google Apps Script user") may still appear for people outside your Google Workspace. That's Google's and can't be removed.
+- **Your own web address** (like `app.lighthousesiargao.com`) is optional. It costs about ₱600–₱900 a year for the domain; GitHub Pages can use it for free.
