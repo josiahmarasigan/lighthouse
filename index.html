@@ -7642,8 +7642,7 @@ window.__LH_APP__ = function () {
       '<button type="submit" class="btn btn-soft btn-block">' + esc(t('wl.rounds.create')) + '</button></form></details></section>';
     html += '<section class="card"><h2 class="wl-h2">' + esc(t('wl.export.title')) + '</h2><div class="row">' +
       '<button type="button" class="btn btn-soft" data-action="wlExport" data-kind="summary">⬇️ ' + esc(t('wl.export.summary')) + '</button>' +
-      (d.isAdmin ? '<button type="button" class="btn btn-soft" data-action="wlExport" data-kind="assessments">⬇️ ' + esc(t('wl.export.all')) + '</button>' : '') +
-      '</div>' + (d.isAdmin ? '<p class="muted small">' + esc(t('wl.export.allNote')) + '</p>' : '') + '</section>';
+      '</div></section>';
     html += wlPrivacyNote(d);
     body.innerHTML = '<div class="stack">' + html + '</div>';
   }
